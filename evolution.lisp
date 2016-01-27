@@ -2,6 +2,7 @@
 ;;;; evolution.lisp
 ;;;; A framework for evolutionary algorithms
 ;;;; TODO Should single character representations be allowed?
+;;;; TODO Add other representation types.
 ;;;;
 
 (in-package #:evolution)
@@ -61,10 +62,11 @@
 
   (let* ((generation 1)
          (pop (fitness population target))
-         (match (match? pop fit-ratio))
+         (match (list (best-match pop fit-ratio) 1))
+         (match-next nil)
          (parents ())
          (children ()))
-    (loop while (and (<= generation limit) (null match)) do
+    (loop while (and (<= generation limit) (not (matchp (first match)))) do
          (setf parents (et-determine-parents pop fit-ratio))
 
          (loop for y from 0 to (- (length parents) 1) by 2 do
@@ -72,10 +74,21 @@
 
          (incf generation)
          (setf pop (fitness (flatten-list children) target))
-         (print-population (all-matches pop 0.2))
-         (setf match (match? pop fit-ratio))
+
+         ; Save initial match unless a better match appears.
+         (cond ((null (first match))
+                (setf match (list (best-match pop fit-ratio) generation)))
+               (t
+                (setf match-next (best-match pop fit-ratio))))
+         
+         (when (not (or (null (first match)) (null match-next)))
+           (cond ((matchp match-next)
+                  (setf match (list match-next generation)))
+                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
+                  (setf match (list match-next generation)))))
+
          (setf children ()))
-    (list match generation)))
+    match))
 
 (defun et-determine-parents (population fit-ratio)
   "Determine parents using Truncation Selection."
@@ -111,8 +124,8 @@
 
 (defun cross-over (parent-1 parent-2)
   "Create new candidates by crossing two other candidates."
-  (case (not (and parent-1 parent-2)) (error 'data-error :text "Invalid parent given."))
-  (case (<= r-size 1)
+  (when (not (and parent-1 parent-2)) (error 'data-error :text "Invalid parent given."))
+  (when (<= r-size 1)
     (error 'implementation-error
            :text "Current single character representations are not available."))
 
@@ -133,7 +146,6 @@
 ;;;   2.  At each piece check if mutation occurs.
 ;;;   3.  If mutation occurs then changes to next available representation.
 ;;; TODO Better mutation algorithm
-;;; TODO Refactor to use other representation types.
 (defun mutation (c)
   "Determine if given candidate is changed."
   (cond ((null c) ())
@@ -157,6 +169,7 @@
         (t (cons (subseq l 0 at) (cons (subseq l at (length l)) nil)))))
 
 (defun flatten-list (l)
+  "Flatten nested lists back into a list of structs."
   (cond ((null l) nil)
         ((typep l 'candidate) (list l))
         (t (concatenate 'list (flatten-list (first l)) (flatten-list (rest l))))))
@@ -165,21 +178,28 @@
   "Find all matches in the POPULATION within the given FIT-RATIO."
   (when (null population) (error 'data-error :text "Nil encountered."))
   (remove-if-not #'(lambda (x) (>= (candidate-fitness x) fit-ratio)) population))
-  
-(defun best-match (population fit-ratio) )
 
-;;; Check the population for a candidate within the fitness ratio.
-;;; Parameters
-;;;   population  - List of candidate solutions.
-;;;   error-ratio - Value from [0.0, 1.0] to determine the fitness range.
-;;; TODO Either delete if unnecessary or refactor to make sure best match is found.
-(defun match? (population error-ratio)
-  (let ((match nil))
-    (loop for x from 0 to (- (length population) 1) by 1 do
-         (cond ((null (nth x population)) (error 'data-error :text "Nil encountered"))
-               ((>= (candidate-fitness (nth x population)) error-ratio)
-                (setf match (nth x population)))))
-    match))
+;;; Algorithm
+;;;   1.  Find all matches >= fit-ratio
+;;;   1.1 If no matches then return nil
+;;;   1.2 If 1 match return match
+;;;   2.  If more than one match increase fit-ratio and check repeat
+;;; TODO A way to dynamically choose step size?
+(defun best-match (population fit-ratio)
+  "Find the best match candidate."
+  (let* ((choices (all-matches population fit-ratio))
+         (best (first choices))
+         (step 0.1))
+    (when (> (length choices) 1)
+      (let ((best-next (best-match choices (+ fit-ratio step))))
+        (unless (null best-next)
+          (when (< (candidate-fitness best) (candidate-fitness best-next))
+            (setf best best-next)))))
+    best))
+
+(defun matchp (c)
+  "Check if candidate matches target"
+  (unless (null c) (when (= (candidate-fitness c) 1.0) t)))
 
 ;;; Used by GENESIS for population initialization.
 (defun create-candidate (r-type r-size)
