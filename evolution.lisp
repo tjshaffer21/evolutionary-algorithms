@@ -22,6 +22,27 @@
 (define-condition data-error (error) ((text :initarg :text :reader text)))
 
 ;;; Parameters
+;;;  method        - SYMBOL used to select evolutionary method.
+;;;    :truncation - Truncation Selection method
+;;;  rtype         - SYMBOL used to selection the representation type to use.
+;;;    :ascii-caps - Capital ASCII characters A-Z
+;;;  target        - Target to be found.
+;;;  rsize         - Size of the representation
+;;;  psize         - Population size
+;;;  limit         - Max times to run algorithm.
+;;;  fit-ratio     - How close we can be to the target [0.0 - 1.0]
+;;; Side Effects
+;;;  r-size is modified
+;;; Returns
+;;;  List containing resulting candidate structure and generation.
+(defun evolution (method rtype target rsize psize &optional (limit 1000) (fit-ratio 1.0))
+  "Main method to run the evolution framework."
+  (let ((init (genesis rtype rsize psize)))
+    (cond ((eq :truncation method)
+           (evolution-truncation init target limit fit-ratio))
+          (t (error 'implementation-error :text "Feature currently not implemented.")))))
+
+;;; Parameters
 ;;;    r-type - SYMBOL used to select which representation type to use.
 ;;;        :ascii-caps - Capital ASCII characters A-Z.
 ;;;    rsize  - The representation size
@@ -54,6 +75,8 @@
 ;;;   If no solution is found then returns a list of (nil, generation);
 ;;;   If a match is found then returns a list of (match, generation)
 ;;;   where, match is a CANDIDATE structure that meets the criteria.
+;;;
+;;; Example: (evolution:evolution-truncation population "HELLO" 10000 0.5)
 (defun evolution-truncation (population target limit fit-ratio)
   "Evolution using Truncation Selection."
   (when (null population)
@@ -86,7 +109,6 @@
                   (setf match (list match-next generation)))
                  ((> (candidate-fitness match-next) (candidate-fitness (first match)))
                   (setf match (list match-next generation)))))
-
          (setf children ()))
     match))
 
@@ -183,7 +205,7 @@
 ;;;   1.  Find all matches >= fit-ratio
 ;;;   1.1 If no matches then return nil
 ;;;   1.2 If 1 match return match
-;;;   2.  If more than one match increase fit-ratio and check repeat
+;;;   2.  If more than one match increase fit-ratio and repeat
 ;;; TODO A way to dynamically choose step size?
 (defun best-match (population fit-ratio)
   "Find the best match candidate."

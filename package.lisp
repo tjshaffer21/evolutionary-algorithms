@@ -3,5 +3,5 @@
 (defpackage #:evolution
   (:use #:cl)
   (:export #:genesis
-	   #:evolution-truncation))
+	   #:evolution))
 
