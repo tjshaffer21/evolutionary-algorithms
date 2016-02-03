@@ -1,11 +1,12 @@
 ;;;;
 ;;;; evolution.lisp
 ;;;; A framework for evolutionary algorithms
-;;;; TODO Should single character representations be allowed?
+;;;; QUESTION Should single character representations be allowed?
 ;;;; TODO Add other representation types.
 ;;;;
 
 (in-package #:evolution)
+(load "roulette")
 
 (defstruct candidate
   (representation nil :read-only t)
@@ -40,13 +41,15 @@
   (let ((init (genesis rtype rsize psize)))
     (cond ((eq :truncation method)
            (evolution-truncation init target limit fit-ratio))
+          ((eq :roulette method)
+           (evolution-roulette init target limit fit-ratio))
           (t (error 'implementation-error :text "Feature currently not implemented.")))))
 
 ;;; Parameters
-;;;    r-type - SYMBOL used to select which representation type to use.
-;;;        :ascii-caps - Capital ASCII characters A-Z.
-;;;    rsize  - The representation size
-;;;    p-size - The population size.
+;;;    r-type        - SYMBOL used to select which representation type to use.
+;;;      :ascii-caps - Capital ASCII characters A-Z.
+;;;    rsize         - The representation size
+;;;    p-size        - The population size.
 ;;; Side Effects
 ;;;    Sets the global r-size variable.
 ;;; Returns
@@ -65,67 +68,6 @@
                    (append (list (create-candidate r-type r-size)) population))))
           (t (error 'implementation-error :text "Feature currently not implemented.")))
     population))
-
-;;; Parameters
-;;;   population - Population seed.
-;;;   target     - Target goal
-;;;   limit      - Max number of generations to run.
-;;;   fit-ratio  - Accuracy of results (0.0 - 1.0)
-;;; Returns
-;;;   If no solution is found then returns a list of (nil, generation);
-;;;   If a match is found then returns a list of (match, generation)
-;;;   where, match is a CANDIDATE structure that meets the criteria.
-;;;
-;;; Example: (evolution:evolution-truncation population "HELLO" 10000 0.5)
-(defun evolution-truncation (population target limit fit-ratio)
-  "Evolution using Truncation Selection."
-  (when (null population)
-    (error 'data-error :text "Population not found.")
-    (return-from evolution-truncation nil))
-
-  (let* ((generation 1)
-         (pop (fitness population target))
-         (match (list (best-match pop fit-ratio) 1))
-         (match-next nil)
-         (parents ())
-         (children ()))
-    (loop while (and (<= generation limit) (not (matchp (first match)))) do
-         (setf parents (et-determine-parents pop fit-ratio))
-
-         (loop for y from 0 to (- (length parents) 1) by 2 do
-              (push (cross-over (nth y parents) (nth (+ y 1) parents)) children))
-
-         (incf generation)
-         (setf pop (fitness (flatten-list children) target))
-
-         ; Save initial match unless a better match appears.
-         (cond ((null (first match))
-                (setf match (list (best-match pop fit-ratio) generation)))
-               (t
-                (setf match-next (best-match pop fit-ratio))))
-         
-         (when (not (or (null (first match)) (null match-next)))
-           (cond ((matchp match-next)
-                  (setf match (list match-next generation)))
-                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
-                  (setf match (list match-next generation)))))
-         (setf children ()))
-    match))
-
-(defun et-determine-parents (population fit-ratio)
-  "Determine parents using Truncation Selection."
-  (let ((parents (all-matches population fit-ratio))
-        (pop-size (cond ((oddp (length population)) (+ 1 (length population)))
-                        (t (length population)))))
-    (when (null parents) (setf parents (all-matches population 0.001))) ; Non-zero
-    
-    (cond ((and (> (length parents) 0) (< (length parents) pop-size))
-           (dotimes (i (- pop-size (length parents)))
-             (push (nth (random (length parents)) parents) parents)))
-          (t
-           (dotimes (i pop-size)
-             (push (nth (random pop-size) population) parents))))
-    parents))
 
 (defun fitness (population target)
   "Calculate the FITNESS values for the given POPULATION"
@@ -182,20 +124,6 @@
                   (t (make-candidate :representation (reverse ncr) :fitness 0)))))
         (t (concatenate 'list (mutation (first c)) (mutation (rest c))))))
 
-(defun split-list (l at)
-  "Split given list L at point AT."
-  (cond ((null l) '())
-        ((null (rest l)) (list (car l)))
-        ((> at (length l)) '())
-        ((<= at 0) '())
-        (t (cons (subseq l 0 at) (cons (subseq l at (length l)) nil)))))
-
-(defun flatten-list (l)
-  "Flatten nested lists back into a list of structs."
-  (cond ((null l) nil)
-        ((typep l 'candidate) (list l))
-        (t (concatenate 'list (flatten-list (first l)) (flatten-list (rest l))))))
-
 (defun all-matches (population fit-ratio)
   "Find all matches in the POPULATION within the given FIT-RATIO."
   (when (null population) (error 'data-error :text "Nil encountered."))
@@ -219,27 +147,38 @@
             (setf best best-next)))))
     best))
 
-(defun matchp (c)
-  "Check if candidate matches target"
-  (unless (null c) (when (= (candidate-fitness c) 1.0) t)))
-
 ;;; Used by GENESIS for population initialization.
+;;; TODO Rewrite to make more generic.
 (defun create-candidate (r-type r-size)
   (cond ((eq :ascii-caps r-type)
          (make-candidate :representation (random-ascii-caps r-size) :fitness 0))
         (t (error 'implementation-error :text "Feature currently not implemented."))))
 
-(defun random-ascii-caps (length)
-  (let ((lst ()))
-    (dotimes (i length)
-      (setf lst (append (list (nth (random 26) +ascii-caps+)) lst))) lst))
+(defun determine-children (parents)
+  (let ((children '()))
+    (loop for y from 0 to (- (length parents) 1) by 2 do
+         (push (cross-over (nth y parents) (nth (+ y 1) parents)) children))
+    children))
 
+(defun flatten-list (l)
+  "Flatten nested lists back into a list of structs."
+  (cond ((null l) nil)
+        ((typep l 'candidate) (list l))
+        (t (concatenate 'list (flatten-list (first l)) (flatten-list (rest l))))))
 (defun get-next-ascii-cap (current)
   (let ((x -1) (y 0))
     (loop while (and (< x 0) (< y (length +ascii-caps+))) do
          (cond ((string= current (nth y +ascii-caps+)) (setf x y)))
          (incf y))
     (nth (mod (+ x 1) 26) +ascii-caps+)))
+
+;;; Used by code outside this file to limit messing with variable.
+;;; TODO May or may not be remved later.
+(defun get-r-size () r-size)
+
+(defun matchp (c)
+  "Check if candidate matches target"
+  (unless (null c) (when (= (candidate-fitness c) 1.0) t)))
 
 (defun print-candidate (c)
   "Print the representation and fitness of the given candidate."
@@ -253,3 +192,133 @@
     (format t "~2<~d~>. ~T~a ~T(~a)~%" (+ i 1)
             (candidate-representation (nth i p))
             (candidate-fitness (nth i p)))))
+
+(defun random-ascii-caps (length)
+  (let ((lst ()))
+    (dotimes (i length)
+      (setf lst (append (list (nth (random 26) +ascii-caps+)) lst))) lst))
+
+(defun split-list (l at)
+  "Split given list L at point AT."
+  (cond ((null l) '())
+        ((null (rest l)) (list (car l)))
+        ((> at (length l)) '())
+        ((<= at 0) '())
+        (t (cons (subseq l 0 at) (cons (subseq l at (length l)) nil)))))
+
+;;;; The following code is divided into sections based on methods used.
+;;;; TODO Decided if selection functions is significant enough to separate into a new
+;;;;      file, or if the selection functions should remain here.
+
+;;;; Start Truncation Selecton
+
+;;; Parameters
+;;;   population - Population seed.
+;;;   target     - Target goal
+;;;   limit      - Max number of generations to run.
+;;;   fit-ratio  - Accuracy of results (0.0 - 1.0)
+;;; Returns
+;;;   If no solution is found then returns a list of (nil, generation);
+;;;   If a match is found then returns a list of (match, generation)
+;;;   where, match is a CANDIDATE structure that meets the criteria.
+;;;
+;;; Example: (evolution:evolution-truncation population "HELLO" 10000 0.5)
+(defun evolution-truncation (population target limit fit-ratio)
+  "Evolution using Truncation Selection."
+  (let* ((generation 1)
+         (pop (fitness population target))
+         (match (list (best-match pop fit-ratio) 1))
+         (match-next nil))
+    (loop while (and (<= generation limit) (not (matchp (first match)))) do
+         (incf generation)
+         (setf pop
+               (fitness (flatten-list
+                         (determine-children (et-determine-parents pop
+                                                                   fit-ratio)))
+                        target))
+
+         ;; TODO How often is this used? Possibly factor out into a metho.
+         ; Save initial match unless a better match appears.
+         (cond ((null (first match))
+                (setf match (list (best-match pop fit-ratio) generation)))
+               (t
+                (setf match-next (best-match pop fit-ratio))))
+         
+         (when (not (or (null (first match)) (null match-next)))
+           (cond ((matchp match-next)
+                  (setf match (list match-next generation)))
+                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
+                  (setf match (list match-next generation))))))
+    match))
+
+(defun et-determine-parents (population fit-ratio)
+  "Determine parents using Truncation Selection."
+  (let ((parents (all-matches population fit-ratio))
+        (pop-size (cond ((oddp (length population)) (+ 1 (length population)))
+                        (t (length population)))))
+    (when (null parents) (setf parents (all-matches population 0.001))) ; Non-zero
+    
+    (cond ((and (> (length parents) 0) (< (length parents) pop-size))
+           (dotimes (i (- pop-size (length parents)))
+             (push (nth (random (length parents)) parents) parents)))
+          (t
+           (dotimes (i pop-size)
+             (push (nth (random pop-size) population) parents))))
+    parents))
+
+;;;; End Truncation Selection
+
+;;;; Start Roulette Selection
+
+;;; Parameters
+;;;  population - Population seed
+;;;  target     - Candidate being searched for.
+;;;  fit-ratio  - How close to the result we can be.
+(defun evolution-roulette (population target limit fit-ratio)
+  "Evolution using a roulette wheel."
+  (let* ((generation 1)
+         (pop (fitness population target))
+         (wheel (create-wheel pop))
+         (match (list (best-match pop fit-ratio) 1))
+         (match-next nil)
+         (parents '()))
+    (loop while (and (<= generation limit) (not (matchp (first match)))) do
+       ;; TODO Check looping with collect method as an alternative
+         (dotimes (i (length pop))
+           (push (nth (search-wheel wheel (random 360)) pop) parents))
+
+         (incf generation)
+         (setf pop (fitness (flatten-list (determine-children parents)) target))
+         
+         (setf parents '())
+         (setf wheel (create-wheel pop))
+
+         ;; TODO See other. Second usage is here.
+         ;; Save initial match unless better is found.
+         (cond ((null (first match))
+                (setf match (list (best-match pop fit-ratio) generation)))
+               (t
+                (setf match-next (best-match pop fit-ratio))))
+
+         (when (not (or (null (first match)) (null match-next)))
+           (cond ((matchp match-next)
+                  (setf match (list match-next generation)))
+                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
+                  (setf match (list match-next generation))))))
+    match))
+
+;;; End Roulette
+
+;;; Testing Code
+(defun test (target rsize psize limit fit)
+  (let* ((test-t (time (evolution :truncation :ascii-caps target rsize psize limit fit)))
+         (test-r (time (evolution :roulette :ascii-caps target rsize psize limit fit))))
+    (format t "~a || ~a || ~a~%----~%" target limit fit)
+    (format t "Truncation:~%")
+    (print-candidate (first test-t))
+    (format t "Generation: ~a~%~%" (first (last test-t)))
+    
+    (format t "Roulette:~%")
+    (print-candidate (first test-r))
+    (format t "Generation: ~a~%~%" (first (last test-r)))))
+;;; End Testing Code

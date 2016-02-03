@@ -2,6 +2,5 @@
 
 (defpackage #:evolution
   (:use #:cl)
-  (:export #:genesis
-	   #:evolution))
+  (:export #:evolution))
 
