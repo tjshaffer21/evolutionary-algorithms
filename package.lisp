@@ -1,6 +1,6 @@
 ;;;; package.lisp
 
 (defpackage #:evolution
-  (:use #:cl)
+  (:use #:cl #:iterate)
   (:export #:evolution))
 

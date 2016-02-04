@@ -3,7 +3,7 @@
 ;;;; A framework for evolutionary algorithms
 ;;;; QUESTION Should single character representations be allowed?
 ;;;; TODO Add other representation types.
-;;;;
+;;;; TODO Think about having r-size be something other than a global.
 
 (in-package #:evolution)
 (load "roulette")
@@ -155,26 +155,22 @@
         (t (error 'implementation-error :text "Feature currently not implemented."))))
 
 (defun determine-children (parents)
-  (let ((children '()))
-    (loop for y from 0 to (- (length parents) 1) by 2 do
-         (push (cross-over (nth y parents) (nth (+ y 1) parents)) children))
-    children))
+    (iterate:iter (iterate:for i from 0 to (1- (length parents)) by 2)
+        (iterate:collect (cross-over (nth i parents) (nth (1+ i) parents)))))
 
 (defun flatten-list (l)
   "Flatten nested lists back into a list of structs."
   (cond ((null l) nil)
         ((typep l 'candidate) (list l))
         (t (concatenate 'list (flatten-list (first l)) (flatten-list (rest l))))))
+
+;;; TODO Rewrite loop to iterate.
 (defun get-next-ascii-cap (current)
   (let ((x -1) (y 0))
     (loop while (and (< x 0) (< y (length +ascii-caps+))) do
          (cond ((string= current (nth y +ascii-caps+)) (setf x y)))
          (incf y))
     (nth (mod (+ x 1) 26) +ascii-caps+)))
-
-;;; Used by code outside this file to limit messing with variable.
-;;; TODO May or may not be remved later.
-(defun get-r-size () r-size)
 
 (defun matchp (c)
   "Check if candidate matches target"
@@ -225,31 +221,32 @@
 ;;; Example: (evolution:evolution-truncation population "HELLO" 10000 0.5)
 (defun evolution-truncation (population target limit fit-ratio)
   "Evolution using Truncation Selection."
-  (let* ((generation 1)
-         (pop (fitness population target))
-         (match (list (best-match pop fit-ratio) 1))
-         (match-next nil))
-    (loop while (and (<= generation limit) (not (matchp (first match)))) do
-         (incf generation)
-         (setf pop
-               (fitness (flatten-list
-                         (determine-children (et-determine-parents pop
-                                                                   fit-ratio)))
-                        target))
+  (iterate:iter
+    (iterate:with generation = 1)
+    (iterate:with pop = (fitness population target))
+    (iterate:with match = (list (best-match pop fit-ratio) 1))
+    (iterate:with match-next)
+    (iterate:while (and (<= generation limit) (not (matchp (first match)))))
+    (incf generation)
+    (setf pop
+          (fitness (flatten-list
+                    (determine-children
+                     (et-determine-parents pop fit-ratio)))
+                   target))
 
-         ;; TODO How often is this used? Possibly factor out into a metho.
-         ; Save initial match unless a better match appears.
-         (cond ((null (first match))
-                (setf match (list (best-match pop fit-ratio) generation)))
-               (t
-                (setf match-next (best-match pop fit-ratio))))
-         
-         (when (not (or (null (first match)) (null match-next)))
-           (cond ((matchp match-next)
-                  (setf match (list match-next generation)))
-                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
-                  (setf match (list match-next generation))))))
-    match))
+    ;; TODO How often is this used? Possibly factor out into a metho.
+    ;; Save initial match unless a better match appears.
+    (cond ((null (first match))
+           (setf match (list (best-match pop fit-ratio) generation)))
+          (t
+           (setf match-next (best-match pop fit-ratio))))
+    
+    (when (not (or (null (first match)) (null match-next)))
+      (cond ((matchp match-next)
+             (setf match (list match-next generation)))
+            ((> (candidate-fitness match-next) (candidate-fitness (first match)))
+             (setf match (list match-next generation)))))
+    (iterate:finally (return match))))
 
 (defun et-determine-parents (population fit-ratio)
   "Determine parents using Truncation Selection."
@@ -276,36 +273,38 @@
 ;;;  fit-ratio  - How close to the result we can be.
 (defun evolution-roulette (population target limit fit-ratio)
   "Evolution using a roulette wheel."
-  (let* ((generation 1)
-         (pop (fitness population target))
-         (wheel (create-wheel pop))
-         (match (list (best-match pop fit-ratio) 1))
-         (match-next nil)
-         (parents '()))
-    (loop while (and (<= generation limit) (not (matchp (first match)))) do
-       ;; TODO Check looping with collect method as an alternative
-         (dotimes (i (length pop))
-           (push (nth (search-wheel wheel (random 360)) pop) parents))
+  (iterate:iter
+    (iterate:with generation = 1)
+    (iterate:with pop = (fitness population target))
+    (iterate:with wheel = (create-wheel pop r-size))
+    (iterate:with match = (list (best-match pop fit-ratio) 1))
+    (iterate:with match-next)   
+    (iterate:while (and (<= generation limit) (not (matchp (first match)))))
+    (setf pop
+          (fitness (flatten-list (determine-children
+                                  (iterate:iter
+                                    (iterate:for i from 0 to (1- (length pop)))
+                                    (iterate:collect (nth
+                                                      (search-wheel wheel
+                                                                    (random 360))
+                                                      pop))))) target))
 
-         (incf generation)
-         (setf pop (fitness (flatten-list (determine-children parents)) target))
-         
-         (setf parents '())
-         (setf wheel (create-wheel pop))
+    (incf generation)
+    (setf wheel (create-wheel pop r-size))
 
-         ;; TODO See other. Second usage is here.
-         ;; Save initial match unless better is found.
-         (cond ((null (first match))
-                (setf match (list (best-match pop fit-ratio) generation)))
-               (t
-                (setf match-next (best-match pop fit-ratio))))
-
-         (when (not (or (null (first match)) (null match-next)))
-           (cond ((matchp match-next)
-                  (setf match (list match-next generation)))
-                 ((> (candidate-fitness match-next) (candidate-fitness (first match)))
-                  (setf match (list match-next generation))))))
-    match))
+    ;; TODO See other. Second usage is here.
+    ;; Save initial match unless better is found.
+    (cond ((null (first match))
+           (setf match (list (best-match pop fit-ratio) generation)))
+          (t
+           (setf match-next (best-match pop fit-ratio))))
+    
+    (when (not (or (null (first match)) (null match-next)))
+      (cond ((matchp match-next)
+             (setf match (list match-next generation)))
+            ((> (candidate-fitness match-next) (candidate-fitness (first match)))
+             (setf match (list match-next generation)))))
+    (iterate:finally (return match))))
 
 ;;; End Roulette
 
@@ -313,7 +312,7 @@
 (defun test (target rsize psize limit fit)
   (let* ((test-t (time (evolution :truncation :ascii-caps target rsize psize limit fit)))
          (test-r (time (evolution :roulette :ascii-caps target rsize psize limit fit))))
-    (format t "~a || ~a || ~a~%----~%" target limit fit)
+    (format t "~%~a || ~a || ~a~%----~%" target limit fit)
     (format t "Truncation:~%")
     (print-candidate (first test-t))
     (format t "Generation: ~a~%~%" (first (last test-t)))
@@ -321,4 +320,29 @@
     (format t "Roulette:~%")
     (print-candidate (first test-r))
     (format t "Generation: ~a~%~%" (first (last test-r)))))
+
+(defun test-wheel (target rtype rsize psize)
+  (let* ((population (fitness (genesis rtype rsize psize) target))
+         (wheel (create-wheel population r-size)))
+    (print-population population)
+    (format t "----~%")
+    (iterate:iter (iterate:for i iterate:in wheel)
+                  (format t "~a~%" i))
+    (format t "----~%")
+    (format t " 54   : ~a~%" (search-wheel wheel 54))
+    (format t "----~%")
+    (format t "  0   : ~a~%" (search-wheel wheel 0))
+    (format t "----~%")
+    (format t " 75.9 : ~a~%" (search-wheel wheel 75.9))
+    (format t "----~%")
+    (format t "184.23: ~a~%" (search-wheel wheel 184.23))
+    (format t "----~%")
+    (format t "250   : ~a~%" (search-wheel wheel 250))
+    (format t "----~%")
+    (format t "269.9 : ~a~%" (search-wheel wheel 269.9))
+    (format t "----~%")
+    (format t "270   : ~a~%" (search-wheel wheel 270))
+    (format t "----~%")
+    (format t "360   : ~a~%" (search-wheel wheel 360))
+    ))
 ;;; End Testing Code

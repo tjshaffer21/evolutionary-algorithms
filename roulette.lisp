@@ -4,64 +4,71 @@
 
 (in-package #:evolution)
 
-(defun create-wheel (data)
-  (reverse (align-slots data (length data) (get-r-size) (get-r-size))))
-
-;;; WARNING
-;;;   1. This code block is written using functions from evolution.lisp.
-;;;      It may not be much of an issue for Lisp as it is with other languages.
-;;;   2. (get-r-size) should be used rather than calling r-size directly.
-;;;   3. The code is rather dirtly written, but TODO should be to see if there
-;;;      is a better method to do the work.
-;;; END WARNING
 ;;; Parameters
-;;;    data      - Data used for the slot alignment. List of candidate structs.
-;;;    counter   - Length of data.
-;;;    step      - Starting step point. Assumed to be decrementing.
-;;;    prev-step - Previous step point. Initially set to be equivialent to step.
-;;;    degrees   - Number of degrees remaining.
+;;;    data  - The data used to create the slots on the wheel.
+;;;    rsize - The rsize for the data.
 ;;; Returns
-;;;    List of a list of degrees ((start, stop) (start, stop) ...)
-(defun align-slots (data counter step prev-step &optional (current 0))
-  "Align slots so better candidates are larger than worse candidates."
-  (unless (< step 0)
-    ;; QUESTION Is there a function similar to remove-if-not but just with the searching?
-    (when (> counter 0) ; If counter = 0 then data then alignment is complete.
-      (let* ((slot (remove-if-not #'(lambda (x)
-                                      (and (>= (candidate-fitness x)
-                                               (/ step (get-r-size)))
-                                           (< (candidate-fitness x)
-                                              (/ prev-step (get-r-size))))) data))
-             (slot-list '())
-             (slot-size (+ (/ (- 360 current) counter)
-                           (* (/ (- 360 current) counter) (/ step (get-r-size))))))
-        (cond ((and (> (length slot) 1) (>= step 5)) (print-population slot)(write "What to do when matches are found?"))
-              ((> (length slot) 0) 
-               (progn
-                 (dotimes (i (length slot))
-                   (push
-                    (list current
-                          (cond ((= current 0) (- slot-size 0.1))
-                                (t (+ current
-                                        ; Last value should be 360.
-                                      (cond ((and (= i (- (length slot) 1)) 
-                                                  (= step 0))
-                                             slot-size)
-                                            (t (- slot-size 0.1)))))))
-                    slot-list)
-                   (setf current (+ current slot-size))))))
-        (append (align-slots data (- counter (length slot)) (- step 1)
-                             step current) slot-list)))))
-  
+;;;    List containing lists of (location, (start, stop))
+(defun create-wheel (data rsize)
+  "Create the roulette wheel."
+  (reverse (align-slots (reverse (get-slots data rsize)) (length data))))
+
+;;; Parameters
+;;;   data  - The data we are using for the slots
+;;;   rsize - The representation size of each piece of data.
+;;; Return
+;;;   List of list (pos, fitness)
+(defun get-slots (data rsize)
+  (remove-if #'(lambda (x) (null x))
+             (iterate:iter
+               (iterate:for step from 0 to (1+ rsize))
+               (collect
+                   (iterate:iter
+                     (iterate:for pos from 0 to (1- (length data)))
+                     (when (= (candidate-fitness (nth pos data)) (/ step rsize))
+                       (collect (list pos (candidate-fitness (nth pos data))))))))))
+
+;;; Parameters
+;;;    slots   - The list containing the slot and fitness values for the data.
+;;;    counter - Counter used for loop (Length of the data).
+;;; Returns
+;;;    List of the list containing (location (start,stop)) for each slot.
+;;; QUESTION Current slot is of form (((x,y) (z,w)) ((a,b))). Is there a better means to manage this without nested loops? 
+(defun align-slots (slots counter)
+  (let ((slot-list '()))
+    (iterate:iter
+      (iterate:with current = 0)
+      (iterate:with c-counter = counter)
+      (iterate:for i in slots)
+      (iterate:iter
+        (iterate:with slot-size = (+ (/ (- 360 current) c-counter)
+                                     (* (/ (- 360 current) c-counter)
+                                        (first (last (first i))))))
+        (iterate:for slot in i)
+        (push
+         (list (first slot) (list current (+ current (cond ((= (1- c-counter) 0)
+                                                            slot-size)
+                                                           (t
+                                                            (- slot-size 0.1))))))
+               slot-list)
+        (setf current (+ current slot-size))
+        (decf c-counter)))
+    slot-list))
+
 ;;; Search the wheel and return the location of the degree.
-;;; BUG Comparision chooses smaller case for float comp.
-;;;   Example: Degree - 146; Wheel - (648/5 145.95718)
+;;; TODO More testing for errors.
 (defun search-wheel (wheel degree)
+  "Search the wheel and return the location of the degree."
   (let* ((mid (floor (/ (length wheel) 2))))
     (cond
-      ((= (length wheel) 1) mid)
-      ((< (rational degree) (rational (first (nth mid wheel))))
+      ((= (length wheel) 1) (first (first wheel)))
+      ((> (- (rational degree)
+                  (rational (first (first (last (nth mid wheel))))))
+          0.001)
        (search-wheel (subseq wheel 0 mid) degree))
-      ((> (rational degree) (rational (first (last (nth mid wheel)))))
-       (search-wheel (subseq wheel mid (length wheel)) degree))
-      (t mid))))
+      ((> (- (rational (first (last (first (last (last (nth mid wheel)))))))
+             (rational degree))
+          0.001)
+       (search-wheel (subseq wheel (1+ mid) (length wheel)) degree))
+      (t
+       (first (nth mid wheel))))))
