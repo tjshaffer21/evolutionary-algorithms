@@ -9,7 +9,13 @@ A collection of evolutionary algorithms for experimental purposes.
 * Common Lisp environment - Code has not been tested outside of CCL.
 * ASDF or Quickload
 * iterate package
-* lisp-unit2 - Unit Testing
+* lisp-unit and lisp-unit2 - If doing unit tests.
+
+### Installation
+
+At this moment there is no means of installation.
+
+The simplest method is to add the project to Quickload's local-project subdirectory, and then use quickload to load the system.
 
 ### Testing
 
@@ -27,8 +33,18 @@ Examples are in the **evolution-examples.asd** system.
 
 The main system is in **evolution.asd**.
 
+The basic steps is to:
+
+1. Create a fitness function
+2. Run the system
+
 ```lisp
-(evolution:evolution :truncation :ascii-caps "HELLO" 5 100 1000 0.75)
+(defun fitness-hello (candidate)
+  (reduce #'+ (iter
+                (for ele in-string "HELLO")
+                (for rep in (evolution::candidate-genotype candidate))
+                (collecting (if (= (evolution::char- rep ele) 0) 1 0)))))
+(evolution:evolution :truncation :ascii-caps (function fitness-hello) 5 100 100)
 ```
 
 ## Limitations/Issues

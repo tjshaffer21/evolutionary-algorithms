@@ -8,6 +8,7 @@
                #:evolution)
   :components ((:file "tests/package")
                (:file "tests/unit_tests")
+               (:file "tests/test_configuration")
                (:file "tests/test_helpers")
                (:file "tests/test_evolution")
                (:file "tests/test_roulette")))

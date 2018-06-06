@@ -7,6 +7,8 @@
   :serial t
   :depends-on (:iterate)
   :components ((:file "src/package")
+               (:file "src/configuration")
+               (:file "src/errors")
                (:file "src/helpers")
                (:file "src/evolution")
                (:file "src/truncate")

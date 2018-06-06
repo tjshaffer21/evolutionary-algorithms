@@ -1,59 +1,59 @@
 ;;;;test_evolution.lisp
 ;;;;
-;;;; Unit Testing for te evolution.lisp file.
+;;;; Unit Testing for the evolution.lisp file.
 ;;;;
 (in-package #:evolution.tests)
 
 (lisp-unit2:define-test test-create-candidate
-  (:tags '(:evolution))
+  (:tags '(:evolution :positive))
   (let ((c (evolution::create-candidate "HELLO")))
     (lisp-unit2:assert-true (typep c 'evolution::candidate))
-    (lisp-unit2:assert-equal "HELLO" (evolution::candidate-representation c))
+    (lisp-unit2:assert-equal (list #\H #\E #\L #\L #\O) (evolution::candidate-genotype c))
     (lisp-unit2:assert-eql 0 (evolution::candidate-fitness c))))
 
-(lisp-unit2:define-test test-matchp-true
-  (:tags '(:evolution))
-  (let ((c (evolution::create-candidate "HELLO" 1.0)))
-    (lisp-unit2:assert-true (evolution::matchp c))))
+(lisp-unit2:define-test test-cross-over-error
+  (:tags '(:evolution :negative))
+  (lisp-unit2:assert-error 'evolution::data-error
+                           (evolution::cross-over (evolution::create-candidate "ABCD") nil))
+  (lisp-unit2:assert-error 'evolution::data-error
+                           (evolution::cross-over nil (evolution::create-candidate "ABCD")))
+  (lisp-unit2:assert-error 'evolution::data-error (evolution::cross-over nil nil)))
 
-(lisp-unit2:define-test test-matchp-false
-  (:tags '(:evolution))
-  (let ((c (evolution::create-candidate "HELLW" 0.9)))
-    (lisp-unit2:assert-false (evolution::matchp c)))
+(lisp-unit2:define-test test-cross-over
+  (:tags '(:evolution :positive))
+  (let* ((p1 (evolution::create-candidate "ABCD"))
+         (p2 (evolution::create-candidate "EFGH"))
+         (ch (evolution::cross-over p1 p2))
+         (c1 (first ch))
+         (c2 (first (last ch))))
+    (lisp-unit2:assert-true (typep ch 'list))
+    (lisp-unit2:assert-true (typep c1 'evolution::candidate))
+    (lisp-unit2:assert-true (typep c2 'evolution::candidate))))
 
-  (lisp-unit2:assert-false (evolution::matchp 2)))
+(lisp-unit2:define-test test-generate-candidate
+  (:tags '(:evolution :positive))
+  (let ((test (evolution::generate-candidate :ascii-caps)))
+    (lisp-unit2:assert-true (typep test 'evolution::candidate))
+    (lisp-unit2:assert-eql 0 (evolution::candidate-fitness test))))
 
-(lisp-unit2:define-test test-get-next-ascii-cap
-  (:tags '(:evolution))
-  (lisp-unit2:assert-equal #\D (evolution::get-next-ascii-cap #\C)))
+(lisp-unit2:define-test test-generate-candidate-error
+  (:tags '(:evolution :negative))
+  (lisp-unit2:assert-error 'evolution::implementation-error
+                            (evolution::generate-candidate :ascii-low)))
 
-(lisp-unit2:define-test test-get-next-ascii-cap-roll
-  (:tags '(:evolution))
-  (lisp-unit2:assert-equal #\A (evolution::get-next-ascii-cap #\Z)))
+(lisp-unit2:define-test test-genesis-error
+  (:tags '(:evolution :negative))
+  (setf evolution::*chromosome-length* 1)
+  (lisp-unit2:assert-error 'evolution::data-error
+                            (evolution::genesis :ascii-caps 100))
+  (setf evolution::*chromosome-length* 3)
+  (lisp-unit2:assert-error 'evolution::data-error
+                            (evolution::genesis :ascii-caps 1))
+  (setf evolution::*chromosome-length* 3)
+  (lisp-unit2:assert-error 'evolution::implementation-error
+                            (evolution::genesis :ascii-low 10)))
 
-(lisp-unit2:define-test test-get-next-ascii-cap-inval
-  (:tags '(:evolution))
-  (lisp-unit2:assert-equal #\A (evolution::get-next-ascii-cap -3)))
-
-(lisp-unit2:undefine-test test-all-matches-nil
-  (:tags '(:evolution)))
-
-(lisp-unit2:define-test test-all-matches
-  (:tags '(:evolution))
-  (let* ((c1 (evolution::create-candidate #\A 1.0))
-         (c2 (evolution::create-candidate #\B 0.9))
-         (c3 (evolution::create-candidate #\C 0.3))
-         (c4 (evolution::create-candidate #\D 0.5))
-         (c5 (evolution::create-candidate #\E 0.75))
-         (cl (list c1 c2 c3 c4 c5)))
-    (lisp-unit2:assert-equal (list c1 c2 c5) (evolution::all-matches cl 0.7))))
-
-    (lisp-unit2:define-test test-best-match
-      (:tags '(:evolution))
-      (let* ((c1 (evolution::create-candidate #\A 1.0))
-             (c2 (evolution::create-candidate #\B 0.9))
-             (c3 (evolution::create-candidate #\C 0.3))
-             (c4 (evolution::create-candidate #\D 0.5))
-             (c5 (evolution::create-candidate #\E 0.75))
-             (cl (list c1 c2 c3 c4 c5)))
-        (lisp-unit2:assert-equal c1 (evolution::best-match cl 0.7))))
+(lisp-unit2:define-test test-genesis
+  (:tags '(:evolution :positive))
+  (let ((g (evolution::genesis :ascii-caps 100)))
+    (lisp-unit2:assert-eql 100 (length g))))

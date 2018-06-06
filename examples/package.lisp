@@ -1,4 +1,4 @@
 ;;;; package.lisp
 (defpackage #:evolution.examples
-  (:use #:cl #:evolution)
+  (:use #:cl #:iterate #:evolution)
   (:export :main-hello))

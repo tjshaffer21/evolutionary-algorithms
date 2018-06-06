@@ -4,47 +4,51 @@
 ;;;;
 (in-package #:evolution)
 
-(defun evolution-truncation (population target limit fit-ratio)
+(defun truncation (population fitness limit)
   "Truncation selection.
 
-  Parameter
+   Parameters
     population : list
-    target
-    limit      : int : Max generations.
-    fit-ratio  : float (0.0-1.0) : How strict the desires results should be.
-  Return
-    (nil, generation) if no result was found.
-    (match, generation) if match was found."
-  (iter
-    (with generation = 1)
-    (with pop = (fitness population target))
-    (with match = (list (best-match pop fit-ratio) 1))
-    (with match-next)
-    (while (and (<= generation limit) (not (matchp (first match)))))
-    (incf generation)
+    fitness    : function : fitnes-func
+    limit      : int
+   Return
+    list : (nil, generation) if no result was found.
+           (match, generation) if match was found."
+    (iter
+      (with generation = 1)
+      (with pop = (ncalculate-population-fitness population fitness))
+      (with potential = nil)
+      (with match = nil)
+      (while (<= generation limit))
+      (if (null match)
+          (progn
+            (setf potential (max-candidate pop))
+            (setf match (list potential generation)))
+          (progn
+            (setf potential (max-candidate pop))
+            (when (> (candidate-fitness potential) (candidate-fitness (first match)))
+                  (setf match (list potential generation)))))
+      (when (= (candidate-fitness (first match)) 1) (return match))
 
-    (setf pop
-          (fitness (flatten-list
-                    (determine-children
-                     (et-determine-parents pop fit-ratio)))
-                   target))
+      (incf generation)
+      (setf pop (ncalculate-population-fitness
+                (flatten-list (determine-children (determine-parents pop)))
+                fitness))
+      (finally (return match))))
 
-    (best-match-check pop fit-ratio generation match match-next)
-    (finally (return match))))
+(defun determine-parents (population)
+  "Determine the parents used for the next generation.
 
-(defun et-determine-parents (population fit-ratio)
-  "Determine parents using Truncation Selection by taking the candidate list
-   POPULATION and the desired min. FIT-RATIO to find fitter parents. If
-   no fit parents exist then parents are choosen from all of POPULATION."
-  (let ((parents (all-matches population fit-ratio))
-        (pop-size (cond ((oddp (length population)) (+ 1 (length population)))
-                        (t (length population)))))
-    (when (null parents) (setf parents (all-matches population 0.001))) ; Non-zero
-
-    (cond ((and (> (length parents) 0) (< (length parents) pop-size))
-           (dotimes (i (- pop-size (length parents)))
-             (push (nth (random (length parents)) parents) parents)))
-          (t
-           (dotimes (i pop-size)
-             (push (nth (random pop-size) population) parents))))
+   Parameters
+    population : list
+   Return
+    list"
+  (let ((parents (cull-population population 0))
+        (pop-size (if (oddp (length population))
+                      (1+ (length population))
+                      (length population))))
+    (when (null parents) (setf parents population))
+    (iter
+      (until (>= (length parents) pop-size))
+      (push (nth (random (length parents)) parents) parents))
     parents))

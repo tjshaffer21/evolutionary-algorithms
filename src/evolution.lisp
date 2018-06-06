@@ -2,267 +2,214 @@
 ;;;;
 ;;;; The main file for various evolutionary algorithms.
 ;;;;
-
 (in-package #:evolution)
 
+#|
+  The chromosome-length is the length of the genotype.
+|#
+(defvar *chromosome-length* 0)
+
+#|
+  Flag indicating whether search should be considered global or local. If the
+  search is defined at local (0) then fitness is normalized on the chromosomes;
+  if search is defined as global (1) then fitness is normalized by overall
+  fitness.
+|#
+(defvar *global-local-search* 0)
+
+#|
+  Potential match for the target criteria.
+  genotype : Each part of the candidate is stored in a list.
+  fitness  : The normalized value of the fitness of the genotype.
+|#
 (defstruct candidate
-  (representation nil :read-only t)
+  (genotype nil :read-only t)
   (fitness 0))
 
-(defconstant +ascii-caps+ (list #\A #\B #\C #\D #\E #\F #\G #\H #\I #\J #\K #\L
-                                #\M #\N #\O #\P #\Q #\R #\S #\T #\U #\V #\W #\X
-                                #\Y #\Z))
+(defun create-candidate (genotype &optional (fitness 0))
+  "Create a candidate struct.
 
-(defvar r-size 0) ; Should only be set by (genesis) while read by other functions.
-
-(defmacro best-match-check (population fit-ratio generation match match-next)
-  "Find the best match for the given criteria.
-
-  Parameters
-    population : list
-    fit-ratio  : float : The ratio should be between 0.0 and 1.0
-    generation : int   : The current generation.
-    match      :       : The curret match.
-    match-next :       : Used to check if there is a better match.
-  Modified
-    match
-    match-next"
-  `(progn
-    (cond ((null (first ,match))
-            (setf ,match (list (best-match ,population ,fit-ratio) ,generation)))
-           (t
-            (setf ,match-next (best-match ,population ,fit-ratio))))
-
-    (when (not (or (null (first ,match)) (null ,match-next)))
-      (cond ((matchp ,match-next)
-              (setf ,match (list ,match-next ,generation)))
-            ((> (candidate-fitness ,match-next) (candidate-fitness (first ,match)))
-              (setf ,match (list ,match-next ,generation)))))))
-
-(defun evolution (method rtype target rsize psize
-                  &optional (limit 1000) (fit-ratio 1.0))
-  "Main function.
-
-  Parameters
-    method : symbol : Indicates the evolution algorithm to be used.
-    rtype  : symbol : Indicates the representation type.
-    target :        : The result that is being looked for.
-    rsize  : int    : Size of /target/
-    psize  : int    : Initial population size for candidate pool.
-    limit  : int    : Max number of iterations before giving up.
-    fit-ratio : float : Error tolerance between 0.0 and 1.0.
-  Return
-    candidate struct
-  Error
-    ierror is thrown if the feature is not implemented."
-  (let ((init (genesis rtype rsize psize)))
-    (case method
-      (:truncation (evolution-truncation init target limit fit-ratio))
-      (:roulette (evolution-roulette init target limit fit-ratio))
-      (t (ierror "Feature not implemented")))))
-
-(defun genesis (r-type rsize p-size)
-  "Creates the initial list of candidates.
-
-  Parameters
-    r-type : symbol
-    rsize  : int
-    psize  : int
-  Modified
-    r-size global
-  Return
-    list of candidate structs
-  Error
-    data-error : p-size < 2
-                 r-size <= 1
-    implementation-error : Feature not implemented."
-  (derror (when (< p-size 2)) "P-SIZE should be at least 2.")
-  (derror (when (<= rsize 1)) "RSIZE must be greater than 1.")
-
-  (setf r-size rsize)
-
-  (let ((population ()))
-    (cond ((eq  :ascii-caps r-type)
-           (dotimes (i p-size)
-             (setf population
-                   (append (list (generate-candidate r-type r-size)) population))))
-          (t (ierror "Feature currently not implemented.")))
-    population))
-
-(defun fitness (population target)
-  "Calculate the fitness for the current population.
-
-  Parameters
-    population : list : Current population list.
-    target     :      : The target
-  Return
-    list"
-  (let ((n-population ()))
-    (cond ((null population) ())
-          ((typep population 'candidate)
-           (push (create-candidate
-                  (candidate-representation population)
-                  (/ (count t
-                            (mapcar #'eql
-                                    (candidate-representation population)
-                                    (coerce target 'list))) r-size))
-                 n-population))
-          (t (setf n-population
-                   (append (concatenate 'list (fitness (first population) target)
-                                        (fitness (rest population) target)) n-population))))
-    n-population))
+   Parameters
+    genotype : : Dependent on user but should be coercable into a list.
+    fitness  : int
+   Return
+    candidate struct"
+  (if (typep genotype 'list)
+      (make-candidate :genotype genotype :fitness fitness)
+      (make-candidate :genotype (coerce genotype 'list) :fitness fitness)))
 
 (defun cross-over (parent-1 parent-2)
   "Create new candidates using two old ones.
 
-  Due to the potential mutation, the split is unverifiable.
-
-  Parameters
+   Parameters
     parent-1 : candidate struct
     parent-2 : candidate struct
-  Return
+   Return
     list
-  Error
+   Error
     data-error : parent-1 and/or parent-2 are invalid."
   (derror (when (not (and parent-1 parent-2))) "Invalid parent given.")
 
-  (let* ((point (+ 1 (random r-size)))
-         (gene-1 (split-list (candidate-representation parent-1) point))
-         (gene-2 (split-list (candidate-representation parent-2) point)))
-    (list (mutation (create-candidate
-                     (concatenate 'list (first gene-1) (first (last gene-2)))))
-          (mutation (create-candidate
-                     (concatenate 'list (first gene-2) (first (last gene-1))))))))
+  (let* ((point (+ 1 (random *chromosome-length*)))
+         (gene-1 (split (candidate-genotype parent-1) point))
+         (gene-2 (split (candidate-genotype parent-2) point)))
+    (list (create-candidate (concatenate 'list (first gene-1)
+                                               (first (last gene-2))))
+          (create-candidate (concatenate 'list (first gene-2)
+                                               (first (last gene-1)))))))
 
-;;; Current method:
-;;;   1.  Iterate through each piece of the representation.
-;;;   2.  At each piece check if mutation occurs.
-;;;   3.  If mutation occurs then changes to next available representation.
-(defun mutation (c)
-  "Transform a candidate.
+(defun cull-population (population fit-val)
+ "Find all matches of candidates that have a given fit-val.
 
   Parameters
-    c : candidate struct
-        list
+   population : list
+   fit-val    : int
   Return
-    candidate struct : If a candidate struct was passed in.
-    list : If a list was passed in."
-  (cond ((null c) ())
-        ((typep c 'candidate)
-          (let ((cr (candidate-representation c)) (ncr ()))
-            (iter
-              (for x from 0 to (1- (length cr)))
-              (cond ((< (- 50 (/ (random 20) 0.2)) 0)
-                     (push (get-next-ascii-cap (nth x cr)) ncr))
-                    (t (push (nth x cr) ncr))))
-
-            (cond ((eql cr ncr) cr)
-                  (t (create-candidate (reverse ncr))))))
-        (t (concatenate 'list (mutation (first c)) (mutation (rest c))))))
-
-(defun all-matches (population fit-ratio)
-  "Find all matches of candidates that have a given fit-ratio.
-
-  Parameters
-    population : list
-    fit-ratio  : float
-  Return
-    list of all matches.
+   list
   Error
-    derror if no population."
-  (derror (when (null population)) "Nil encountered.")
-  (remove-if-not #'(lambda (x) (>= (candidate-fitness x) fit-ratio)) population))
-
-(defun best-match (population fit-ratio)
-  "Find the best match candidate.
-
-  Parameters
-    population : list
-    fit-ratio : float
-  Return
-    candidate struct"
-  (let* ((choices (all-matches population fit-ratio))
-         (best (first choices))
-         (step 0.1))
-    (when (> (length choices) 1)
-      (let ((best-next (best-match choices (+ fit-ratio step))))
-        (unless (null best-next)
-          (when (< (candidate-fitness best) (candidate-fitness best-next))
-            (setf best best-next)))))
-    best))
-
-(defun create-candidate (representation &optional (fitness 0))
-  "Create a candidate struct.
-
-  Parameters
-    representation : The value used to represent a candidate. The type is
-                     determined by the user's choice of rtype.
-    fitness        : float : 0.0 - 1.0. The fitness value of the candidate.
-  Return
-    candidate struct"
-  (make-candidate :representation representation :fitness fitness))
+   data-error if no population."
+ (derror (when (null population)) "Nil encountered.")
+ (remove-if-not #'(lambda (x) (> (candidate-fitness x) fit-val))
+               population))
 
 (defun determine-children (parents)
   "Take a list and determine new set of children from the list.
 
-  Parameters
+   Parameters
     parents : list
-  Return
+   Return
     list"
-  (iter (for i from 0 to (1- (length parents)) by 2)
-    (collect (cross-over (nth i parents) (nth (1+ i) parents)))))
+  (iter
+    (for i from 0 to (1- (length parents)) by 2)
+    (collect (mutation (cross-over (nth i parents)
+                                   (nth (1+ i) parents))))))
 
-(defun generate-candidate (r-type rsize)
+(defun evolution (method rtype fitness-func chromosomes psize
+                  &optional (limit 1000))
+  "Main function.
+
+   Parameters
+    method       : keyword : Evolutionary algorithm
+    rtype        : keyword : genotype type
+    fitness-func : function
+    chromosomes  : int : Number of individual pieces.
+    psize  : int : Initial population size for candidate pool.
+    limit  : int : Max number of iterations before giving up.
+   Return
+    candidate struct
+   Modified
+    *chromosome-length* is set.
+   Error
+    implementation-error is thrown if the feature is not implemented."
+  (format *standard-output* "Search set to: ")
+  (if (= *global-local-search* 0)
+      (format *standard-output* "local~%")
+      (format *standard-output* "global~%"))
+
+  (format *standard-output* "Setting chromosome length to...~a~%" chromosomes)
+  (set-chromosome-length chromosomes)
+
+  (let ((init (genesis rtype psize)))
+    (case method
+      (:truncation (truncation init fitness-func limit))
+      ;(:roulette (evolution-roulette init target limit fit-ratio))
+      (t (ierror "Feature not implemented")))))
+
+(defun generate-candidate (genotype)
   "Generate a new candidate.
 
-  Parameters
-    r-type : symbol
-    rsize  : int
-  Return
+   Parameters
+    genotype : keyword
+   Return
     candidate struct
-  Error
+   Error
     implementation-error"
-  "Create a new candidate structure of given R-TYPE and RSIZE."
-  (cond ((eq :ascii-caps r-type)
-         (make-candidate :representation (generate-random-ascii-caps rsize) :fitness 0))
-        (t (ierror "Feature currently not implemented."))))
+  (case genotype
+    (:ascii-caps
+      (make-candidate :genotype
+                        (generate-random-ascii-caps *chromosome-length*)
+                      :fitness 0))
+    (t (ierror "Feature currently not implemented."))))
 
-(defun generate-random-ascii-caps (length)
-  "Generate list of random capital ascii chars.
+(defun genesis (genotype population)
+  "Creates the initial list of candidates.
 
-  Parameters
-    length : int : Length of the list of random characters.
-  Return
-    list"
-  (let ((lst ()))
-    (dotimes (i length)
-      (setf lst (append (list (nth (random 26) +ascii-caps+)) lst))) lst))
+   Parameters
+    genotype   : keyword
+    population : int
+   Return
+    list of candidate structs
+   Error
+    data-error : population < 2
+                 *chromosome-length* <= 1
+    implementation-error : Feature not implemented."
+  (derror (when (< population 2)) "Population should be at least 2.")
+  (derror (when (<= *chromosome-length* 1)) "Length of chromosomes not configured.")
 
-(defun get-next-ascii-cap (current)
-  "Find the next ascii character.
+  (let ((population-list ()))
+    (case genotype
+      (:ascii-caps (dotimes (i population)
+                      (setf population-list
+                            (append (list (generate-candidate genotype))
+                             population-list))))
+      (t (ierror "Feature currently not implemented.")))
+    population-list))
 
-  Parameters
-    current : standrd-char
-  Return
-    standard-char"
-  (cond ((typep current 'standard-char)
-         (let ((x -1))
-            (iter
-              (with y = 0)
-              (while (and (< x 0) (< y (length +ascii-caps+))))
-              (when (char= current (nth y +ascii-caps+)) (setf x y))
-              (incf y))
-            (nth (mod (1+ x) 26) +ascii-caps+)))
-        (t #\A)))
+#|
+  Current method:
+  1.  Iterate through each piece of the genotype.
+  2.  At each piece check if mutation occurs.
+ 3.  If mutation occurs then changes to next available genotype.
+|#
+(defun mutation (c)
+  "Randomly transform a candidate.
 
-(defun matchp (c)
-  "Check if candidate matches the target.
-
-  Parameters
+   Parameters
     c : candidate struct
-  Return
-    t if a match;
-    nil if not a match."
-  (if (typep c 'candidate)
-      (when (= (candidate-fitness c) 1.0) t)
-      nil))
+        list
+   Return
+    candidate struct : If a candidate struct was passed in.
+    list             : If a list was passed in."
+    (cond ((null c) nil)
+          ((typep c 'candidate)
+            (let ((cr (candidate-genotype c)) (ncr ())
+                  (mutation-rate (/ 1 *chromosome-length*)))
+                 (iter
+                   (for x from 0 to (1- (length cr)))
+                   (cond ((< (- 50 (/ (random 20) 0.2)) 0)
+                          (push (get-next-ascii-cap (nth x cr)) ncr))
+                         (t (push (nth x cr) ncr))))
+
+                 (cond ((eql cr ncr) cr)
+                       (t (create-candidate (reverse ncr))))))
+          (t (list (mutation (first c)) (mutation (rest c))))))
+
+(defun ncalculate-population-fitness (population fitness)
+  "Calculate the fitness of the entire population.
+
+   Parameters
+    population   : list
+    fitness      : function : fitness-func
+   Modified
+    population : fitness slot is modified with the fitness values.
+   Return
+    list : Population list is returned."
+  (iter
+    (with total = 0)
+    (for c in population)
+    (let ((fit (funcall fitness c)))
+      (if (= *global-local-search* 0)
+          (progn
+            (setf (candidate-fitness c) (/ fit *chromosome-length*)))
+          (progn
+            (setf (candidate-fitness c) fit)
+            (setf total (+ total fit)))))
+    (finally
+      (when (= *global-local-search* 1)
+        (map nil #'(lambda (x)
+                    (setf (candidate-fitness x)
+                          (if (> total 0)
+                              (/ (candidate-fitness x) total)
+                              0)))
+            population))))
+  population)

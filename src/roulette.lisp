@@ -7,13 +7,13 @@
 (defun align-slots (slots counter)
   "Align slots so fitter candidates take more space.
 
-  To prevent overlap, the ending side is subtracted by 0.1. As such, a full
-  circle is considered (0, 359.9).
+   To prevent overlap, the ending side is subtracted by 0.1. As such, a full
+   circle is considered (0, 359.9).
 
-  Parameters
+   Parameters
     slots   : list : List of slots ((pos, fit) ...)
     counter : int  : Length of candidate list.
-  Return
+   Return
     list ((location (start stop)))"
   (let ((slot-list '()))
     (iterate:iter
@@ -38,10 +38,10 @@
 (defun create-wheel (data rsize)
   "Create the roulette wheel.
 
-  Parameters
+   Parameters
     data : list : List of candidates.
     rsize : int : Size of the representation.
-  Return
+   Return
     list (location (start stop)), where location is the data location and
          start/stop are the degree range (float) of the wheel."
   (reverse (align-slots (reverse (get-slots data rsize)) (length data))))
@@ -49,12 +49,12 @@
 (defun evolution-roulette (population target limit fit-ratio)
   "Roulette Wheel algorithm.
 
-  Parameters
+   Parameters
     population : list
     target     :
     limit      : int : Max generation.
     fit-ratio  : float : (0.0 - 1.0)
-  Return
+   Return
     (nil, generation) if no result.
     (match, generation) if result."
   (iter
@@ -64,15 +64,12 @@
     (with match = (list (best-match pop fit-ratio) 1))
     (with match-next)
     (while (and (<= generation limit) (not (matchp (first match)))))
-    (setf pop
-          (fitness
-           (flatten-list
-            (determine-children
-             (iter
-               (for i from 0 to (1- (length pop)))
-               (collect (nth (search-wheel wheel (random 360))
-                             pop))))) target))
-
+    (setf pop (fitness (flatten-list
+                          (determine-children
+                            (iter
+                              (for i from 0 to (1- (length pop)))
+                              (collect (nth (search-wheel wheel (random 360))
+                                        pop))))) target))
     (incf generation)
     (setf wheel (create-wheel pop r-size))
 
@@ -82,10 +79,10 @@
 (defun get-slots (data rsize)
   "Creates the initial slots.
 
-  Parameters
+   Parameters
     data : list : Candidate list
     rsize : int : Size of the representation.
-  Return
+   Return
     list : (pos fitness), where pos is the location of data and fitness is the
            fitness ratio."
   (remove-if #'(lambda (x) (null x))
@@ -100,10 +97,10 @@
 (defun search-wheel (wheel degree)
   "Search the wheel for the desired slot.
 
-  Parameters
+   Parameters
     wheel : list
     degree : float
-  Return
+   Return
     int : Location of the candidate in the candidate list."
   (let* ((mid (floor (/ (length wheel) 2))))
     (cond
